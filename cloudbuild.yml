@@ -1,0 +1,65 @@
+timeout: "1200s"
+steps:
+  # Build base alpine-chrome image
+  - name: "gcr.io/cloud-builders/docker"
+    id: "Build alpine-chrome base"
+    script: |
+      docker build -t us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:$COMMIT_SHA \
+                   -t us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:latest .
+    automapSubstitutions: true
+
+  # Extract Chrome version for tagging
+  - name: "gcr.io/cloud-builders/docker"
+    id: "Extract Chrome version"
+    waitFor: ["Build alpine-chrome base"]
+    script: |
+      CHROME_VERSION=$(docker run --rm us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:latest chromium-browser --version | grep -oE 'Chromium ([0-9]+)\.' | grep -oE '[0-9]+')
+      echo "Chrome version: $CHROME_VERSION"
+      echo "$CHROME_VERSION" > /workspace/chrome_version.txt
+    automapSubstitutions: true
+
+  # Build alpine-chrome with Node.js
+  - name: "gcr.io/cloud-builders/docker"
+    id: "Build alpine-chrome with-node"
+    waitFor: ["Extract Chrome version"]
+    script: |
+      CHROME_VERSION=$(cat /workspace/chrome_version.txt)
+      docker build -t us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:with-node-$COMMIT_SHA \
+                   -t us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:with-node \
+                   -t us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:$CHROME_VERSION-with-node \
+                   with-node/
+    automapSubstitutions: true
+
+  # Build alpine-chrome with Puppeteer
+  - name: "gcr.io/cloud-builders/docker"
+    id: "Build alpine-chrome with-puppeteer"
+    waitFor: ["Build alpine-chrome with-node"]
+    script: |
+      CHROME_VERSION=$(cat /workspace/chrome_version.txt)
+      docker build -t us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:with-puppeteer-$COMMIT_SHA \
+                   -t us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:with-puppeteer \
+                   -t us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:$CHROME_VERSION-with-puppeteer \
+                   with-puppeteer/
+    automapSubstitutions: true
+
+  # Tag base image with Chrome version and push Chrome version tags
+  - name: "gcr.io/cloud-builders/docker"
+    id: "Push Chrome version tags"
+    waitFor: ["Build alpine-chrome with-puppeteer"]
+    script: |
+      CHROME_VERSION=$(cat /workspace/chrome_version.txt)
+      # Tag and push base image with Chrome version
+      docker tag us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:latest us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:$CHROME_VERSION
+      docker push us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:$CHROME_VERSION
+      # Push Chrome version tags for variants
+      docker push us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:$CHROME_VERSION-with-node
+      docker push us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:$CHROME_VERSION-with-puppeteer
+    automapSubstitutions: true
+
+images:
+  - "us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:$COMMIT_SHA"
+  - "us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:latest"
+  - "us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:with-node-$COMMIT_SHA"
+  - "us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:with-node"
+  - "us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:with-puppeteer-$COMMIT_SHA"
+  - "us-west1-docker.pkg.dev/$PROJECT_ID/api/alpine-chrome:with-puppeteer"
